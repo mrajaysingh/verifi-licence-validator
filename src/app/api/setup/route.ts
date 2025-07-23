@@ -75,7 +75,7 @@ export async function POST(request: Request) {
     })
 
     // Remove sensitive data before sending response
-    const { password: pwd, secretKey: key, ...safeAdminData } = admin
+    const { password: _, secretKey: __, ...safeAdminData } = admin
 
     return NextResponse.json(safeAdminData)
   } catch (error) {

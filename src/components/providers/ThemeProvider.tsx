@@ -2,13 +2,13 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 
-type Theme = 'dark' | 'light'
+type Theme = 'light' | 'dark'
 
 const ThemeContext = createContext<{
   theme: Theme
   setTheme: (theme: Theme) => void
 }>({
-  theme: 'dark',
+  theme: 'light',
   setTheme: () => null
 })
 
@@ -17,15 +17,29 @@ export function ThemeProvider({
 }: {
   children: React.ReactNode
 }) {
+  const [theme, setTheme] = useState<Theme>('light')
   const [mounted, setMounted] = useState(false)
-  const [theme, setTheme] = useState<Theme>('dark')
 
   useEffect(() => {
     setMounted(true)
-    // Always set dark theme
-    document.documentElement.classList.add('dark')
-    document.body.classList.add('bg-[#0f0f0f]', 'text-gray-100')
+    const savedTheme = localStorage.getItem('theme') as Theme | null
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+
+    if (savedTheme) {
+      setTheme(savedTheme)
+      document.documentElement.classList.toggle('dark', savedTheme === 'dark')
+    } else if (prefersDark) {
+      setTheme('dark')
+      document.documentElement.classList.add('dark')
+    }
   }, [])
+
+  useEffect(() => {
+    if (mounted) {
+      localStorage.setItem('theme', theme)
+      document.documentElement.classList.toggle('dark', theme === 'dark')
+    }
+  }, [theme, mounted])
 
   if (!mounted) {
     return null
@@ -40,7 +54,7 @@ export function ThemeProvider({
 
 export const useTheme = () => {
   const context = useContext(ThemeContext)
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useTheme must be used within a ThemeProvider')
   }
   return context

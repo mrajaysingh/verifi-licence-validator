@@ -4,75 +4,64 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import Image from 'next/image'
-import { UserCircleIcon, LockClosedIcon } from '@heroicons/react/24/outline'
+import { PoweredBy } from '@/components/PoweredBy'
 
 export default function SetupPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
-  const [isAccessAllowed, setIsAccessAllowed] = useState(true) // Default to true
-  const [ipAddress, setIpAddress] = useState('Loading...')
-  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [ipAddress, setIpAddress] = useState('')
+  const [profileImage, setProfileImage] = useState<File | null>(null)
+  const [profilePreview, setProfilePreview] = useState<string>('')
   const [formData, setFormData] = useState({
-    username: '',
     name: '',
+    username: '',
     email: '',
     password: '',
     confirmPassword: '',
     secretKey: '',
-    mobileNumber: '',
-    profileImage: null as File | null,
+    mobileNumber: ''
   })
 
-  // Check if setup is allowed
   useEffect(() => {
-    const checkAccess = async () => {
-      try {
-        const response = await fetch('/api/setup/check-access', {
-          // Add cache control to prevent stale responses
-          cache: 'no-store',
-          headers: {
-            'Cache-Control': 'no-cache'
-          }
-        })
-        
-        if (!response.ok) {
-          throw new Error('Failed to check access')
-        }
+    checkSetupAccess()
+    fetchIpAddress()
+  }, [])
 
-        const data = await response.json()
-        setIsAccessAllowed(data.isAllowed)
-      } catch (error) {
-        console.error('Access check error:', error)
-        // Default to allowed on error to prevent lockout
-        setIsAccessAllowed(true)
-        toast.error('Failed to verify access. Proceeding with setup.')
-      } finally {
-        setLoading(false)
+  const checkSetupAccess = async () => {
+    try {
+      const res = await fetch('/api/setup/check-access')
+      if (!res.ok) {
+        router.push('/login')
+        return
       }
+      setLoading(false)
+    } catch (error) {
+      router.push('/login')
     }
+  }
 
-    checkAccess()
-  }, [])
-
-  // Fetch IP address on mount
-  useEffect(() => {
-    fetch('https://api.ipify.org?format=json')
-      .then(res => res.json())
-      .then(data => setIpAddress(data.ip))
-      .catch(() => setIpAddress('Unable to fetch IP'))
-  }, [])
+  const fetchIpAddress = async () => {
+    try {
+      const res = await fetch('https://api.ipify.org?format=json')
+      const data = await res.json()
+      setIpAddress(data.ip)
+    } catch (error) {
+      setIpAddress('Unable to fetch IP')
+    }
+  }
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      if (file.size > 5 * 1024 * 1024) {
         toast.error('Image size should be less than 5MB')
         return
       }
-      setFormData(prev => ({ ...prev, profileImage: file }))
+      setProfileImage(file)
       const reader = new FileReader()
       reader.onloadend = () => {
-        setImagePreview(reader.result as string)
+        setProfilePreview(reader.result as string)
       }
       reader.readAsDataURL(file)
     }
@@ -80,235 +69,224 @@ export default function SetupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
     if (formData.password !== formData.confirmPassword) {
       toast.error('Passwords do not match')
       return
     }
 
     try {
-      setLoading(true)
-
-      // Create FormData for file upload
+      setSubmitting(true)
       const formDataToSend = new FormData()
       Object.entries(formData).forEach(([key, value]) => {
-        if (value !== null) {
+        if (key !== 'confirmPassword') {
           formDataToSend.append(key, value)
         }
       })
-      formDataToSend.append('lastKnownIp', ipAddress)
+      if (profileImage) {
+        formDataToSend.append('profileImage', profileImage)
+      }
+      formDataToSend.append('ipAddress', ipAddress)
 
-      const response = await fetch('/api/setup', {
+      const res = await fetch('/api/setup', {
         method: 'POST',
         body: formDataToSend
       })
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || 'Failed to setup admin account')
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.error || 'Failed to create admin account')
       }
 
       toast.success('Admin account created successfully')
       router.push('/login')
     } catch (error) {
-      console.error('Setup error:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to setup admin account')
+      toast.error(error instanceof Error ? error.message : 'Failed to create admin account')
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0f0f0f] p-4">
-        <div className="h-8 w-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-      </div>
-    )
-  }
-
-  if (!isAccessAllowed) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0f0f0f] p-4">
-        <div className="backdrop-blur-lg bg-white/10 rounded-2xl p-8 shadow-lg text-center max-w-md">
-          <LockClosedIcon className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-white mb-2">Access Denied</h2>
-          <p className="text-gray-300 mb-4">
-            The setup page is currently disabled. Please contact an administrator for access.
-          </p>
-          <button
-            onClick={() => router.push('/login')}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-          >
-            Go to Login
-          </button>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="h-8 w-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0f0f0f] p-4">
-      <div className="w-full max-w-2xl">
-        <div className="backdrop-blur-lg bg-white/10 rounded-2xl p-8 shadow-lg">
-          <h2 className="text-3xl font-bold text-center mb-8 text-white">Admin Setup</h2>
-          
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Profile Image Upload */}
-            <div className="flex flex-col items-center mb-6">
-              <div className="relative w-32 h-32 mb-4">
-                {imagePreview ? (
+    <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 md:p-8">
+      <div className="w-full max-w-2xl space-y-8">
+        {/* Header */}
+        <div className="text-center">
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-4xl">
+            Initial Setup
+          </h1>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+            Create your admin account to get started
+          </p>
+        </div>
+
+        {/* Setup Form */}
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="backdrop-blur-lg bg-white/30 dark:bg-gray-800/30 rounded-2xl p-6 shadow-xl space-y-6 border border-gray-200 dark:border-gray-700">
+            {/* Profile Image */}
+            <div className="flex flex-col items-center space-y-4">
+              <div className="relative w-32 h-32 rounded-full overflow-hidden border-4 border-white dark:border-gray-700 shadow-lg">
+                {profilePreview ? (
                   <Image
-                    src={imagePreview}
+                    src={profilePreview}
                     alt="Profile Preview"
                     fill
-                    className="rounded-full object-cover"
+                    className="object-cover"
                   />
                 ) : (
-                  <UserCircleIcon className="w-full h-full text-gray-400" />
+                  <div className="w-full h-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                    <span className="text-gray-400 dark:text-gray-500 text-4xl">?</span>
+                  </div>
                 )}
               </div>
-              <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer transition-colors">
-                Upload Photo
+              <label className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer">
                 <input
                   type="file"
                   accept="image/*"
                   onChange={handleImageChange}
-                  className="hidden"
+                  className="sr-only"
                 />
+                Upload Photo
               </label>
-              <p className="text-xs text-gray-400 mt-2">Max size: 5MB</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Form Fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
-                <label htmlFor="username" className="block text-sm font-medium text-gray-200 mb-2">
-                  Username
-                </label>
-                <input
-                  id="username"
-                  type="text"
-                  required
-                  value={formData.username}
-                  onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none text-white"
-                  placeholder="admin_username"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-200 mb-2">
+                <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Full Name
                 </label>
                 <input
-                  id="name"
                   type="text"
+                  id="name"
                   required
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none text-white"
-                  placeholder="John Doe"
+                  className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
                 />
               </div>
 
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-200 mb-2">
+                <label htmlFor="username" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  id="username"
+                  required
+                  value={formData.username}
+                  onChange={(e) => setFormData(prev => ({ ...prev, username: e.target.value }))}
+                  className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Email
                 </label>
                 <input
-                  id="email"
                   type="email"
+                  id="email"
                   required
                   value={formData.email}
                   onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none text-white"
-                  placeholder="admin@example.com"
+                  className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
                 />
               </div>
 
               <div>
-                <label htmlFor="mobileNumber" className="block text-sm font-medium text-gray-200 mb-2">
+                <label htmlFor="mobileNumber" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Mobile Number
                 </label>
                 <input
-                  id="mobileNumber"
                   type="tel"
-                  required
+                  id="mobileNumber"
                   value={formData.mobileNumber}
                   onChange={(e) => setFormData(prev => ({ ...prev, mobileNumber: e.target.value }))}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none text-white"
-                  placeholder="+1234567890"
+                  className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
                 />
               </div>
 
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-200 mb-2">
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Password
                 </label>
                 <input
-                  id="password"
                   type="password"
+                  id="password"
                   required
                   value={formData.password}
                   onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none text-white"
-                  placeholder="••••••••"
+                  className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
                 />
               </div>
 
               <div>
-                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-200 mb-2">
+                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Confirm Password
                 </label>
                 <input
-                  id="confirmPassword"
                   type="password"
+                  id="confirmPassword"
                   required
                   value={formData.confirmPassword}
                   onChange={(e) => setFormData(prev => ({ ...prev, confirmPassword: e.target.value }))}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none text-white"
-                  placeholder="••••••••"
+                  className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
                 />
               </div>
 
               <div>
-                <label htmlFor="secretKey" className="block text-sm font-medium text-gray-200 mb-2">
+                <label htmlFor="secretKey" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Secret Key
                 </label>
                 <input
-                  id="secretKey"
                   type="password"
+                  id="secretKey"
                   required
                   value={formData.secretKey}
                   onChange={(e) => setFormData(prev => ({ ...prev, secretKey: e.target.value }))}
-                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none text-white"
-                  placeholder="Enter secret key"
+                  className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-gray-900 dark:text-white shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-200 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   IP Address
                 </label>
-                <div className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-gray-400">
-                  {ipAddress}
-                </div>
+                <input
+                  type="text"
+                  value={ipAddress}
+                  disabled
+                  className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 px-3 py-2 text-gray-500 dark:text-gray-400 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm"
+                />
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-3 px-4 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center mt-8"
-            >
-              {loading ? (
-                <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                'Create Admin Account'
-              )}
-            </button>
-          </form>
-        </div>
+            {/* Submit Button */}
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="inline-flex justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {submitting ? (
+                  <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  'Create Account'
+                )}
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
-    </div>
+      <PoweredBy className="fixed bottom-4" />
+    </main>
   )
 } 

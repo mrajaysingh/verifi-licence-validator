@@ -1,70 +1,60 @@
-import NextAuth, { type NextAuthOptions } from 'next-auth'
+import NextAuth from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { prisma } from '@/lib/prisma'
+import bcrypt from 'bcryptjs'
 
-if (!process.env.NEXTAUTH_SECRET) {
-  throw new Error('Please provide process.env.NEXTAUTH_SECRET')
-}
-
-export const authOptions: NextAuthOptions = {
+export const authOptions = {
   providers: [
     CredentialsProvider({
       name: 'Credentials',
       credentials: {
-        email: { label: "Email", type: "email" },
-        verificationCode: { label: "Verification Code", type: "text" },
-        secretKey: { label: "Secret Key", type: "password" }
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' },
+        secretKey: { label: 'Secret Key', type: 'password' },
+        otp: { label: 'OTP', type: 'text' }
       },
       async authorize(credentials) {
         try {
-          if (!credentials?.email || !credentials?.verificationCode || !credentials?.secretKey) {
-            console.log('Missing credentials:', { 
-              email: credentials?.email, 
-              code: credentials?.verificationCode,
-              hasSecretKey: !!credentials?.secretKey
+          if (!credentials?.email || !credentials?.password || !credentials?.secretKey || !credentials?.otp) {
+            console.log('Missing credentials:', {
+              email: credentials?.email,
+              hasPassword: !!credentials?.password,
+              hasSecretKey: !!credentials?.secretKey,
+              hasOTP: !!credentials?.otp
             })
-            throw new Error('Missing credentials')
+            throw new Error('All fields are required')
           }
 
-          console.log('Attempting to verify code:', { email: credentials.email })
-
+          // Find admin
           const admin = await prisma.admin.findUnique({
             where: { email: credentials.email }
           })
 
           if (!admin) {
-            console.log('Admin not found:', credentials.email)
-            throw new Error('Invalid verification attempt')
+            throw new Error('Invalid credentials')
+          }
+
+          // Verify password
+          const isValidPassword = await bcrypt.compare(credentials.password, admin.password)
+          if (!isValidPassword) {
+            throw new Error('Invalid credentials')
           }
 
           // Verify secret key
-          if (admin.secretKey !== credentials.secretKey) {
-            console.log('Invalid secret key for:', credentials.email)
+          if (credentials.secretKey !== admin.secretKey) {
             throw new Error('Invalid secret key')
           }
 
-          console.log('Found admin:', { 
-            email: admin.email, 
-            expectedCode: admin.verificationCode,
-            receivedCode: credentials.verificationCode,
-            expires: admin.verificationExpires
-          })
-
+          // Verify OTP
           if (!admin.verificationCode || !admin.verificationExpires) {
-            console.log('No verification code found')
             throw new Error('No verification code requested')
           }
 
           if (admin.verificationExpires < new Date()) {
-            console.log('Code expired')
             throw new Error('Verification code has expired')
           }
 
-          if (admin.verificationCode !== credentials.verificationCode) {
-            console.log('Code mismatch:', {
-              expected: admin.verificationCode,
-              received: credentials.verificationCode
-            })
+          if (admin.verificationCode !== credentials.otp) {
             throw new Error('Invalid verification code')
           }
 
@@ -78,7 +68,6 @@ export const authOptions: NextAuthOptions = {
             }
           })
 
-          console.log('Verification successful')
           return {
             id: admin.id,
             email: admin.email,
@@ -92,34 +81,25 @@ export const authOptions: NextAuthOptions = {
     })
   ],
   pages: {
-    signIn: '/login',
-    error: '/login'
-  },
-  session: {
-    strategy: 'jwt',
-    maxAge: 12 * 60 * 60, // 12 hours
+    signIn: '/login'
   },
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id
-        token.email = user.email
-        token.name = user.name
       }
       return token
     },
     async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id as string
-        session.user.email = token.email as string
-        session.user.name = token.name as string
+      if (token) {
+        session.user.id = token.id
       }
       return session
     }
   },
-  secret: process.env.NEXTAUTH_SECRET,
-  jwt: {
-    maxAge: 12 * 60 * 60 // 12 hours
+  session: {
+    strategy: 'jwt',
+    maxAge: 24 * 60 * 60 // 24 hours
   }
 }
 

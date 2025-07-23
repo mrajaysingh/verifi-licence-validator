@@ -12,7 +12,7 @@ const transporter = nodemailer.createTransport({
 })
 
 // Verify SMTP connection configuration
-transporter.verify(function(error, success) {
+transporter.verify((error: Error | null) => {
   if (error) {
     console.error('SMTP Verification Error:', error);
   } else {
@@ -44,11 +44,11 @@ export async function sendVerificationCode(email: string, code: string) {
     const info = await transporter.sendMail(mailOptions)
     console.log('Email sent successfully:', info.response);
     return true
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error sending email:', error)
     // Log detailed error information
-    if (error.response) {
-      console.error('SMTP Response:', error.response);
+    if (error && typeof error === 'object' && 'response' in error) {
+      console.error('SMTP Response:', (error as { response: unknown }).response);
     }
     return false
   }

@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import { Switch } from '@headlessui/react'
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { PoweredBy } from '@/components/PoweredBy'
 
 interface AdminProfile {
   id: string
@@ -22,7 +23,7 @@ interface AdminProfile {
 
 export default function ProfilePage() {
   const router = useRouter()
-  const { data: session, status } = useSession()
+  const { status } = useSession()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [profile, setProfile] = useState<AdminProfile | null>(null)
@@ -36,15 +37,7 @@ export default function ProfilePage() {
     confirmPassword: ''
   })
 
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/login')
-    } else if (status === 'authenticated') {
-      fetchProfile()
-    }
-  }, [status, router])
-
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       const [profileRes, setupRes] = await Promise.all([
         fetch('/api/admin/profile'),
@@ -81,7 +74,15 @@ export default function ProfilePage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [router])
+
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/login')
+    } else if (status === 'authenticated') {
+      fetchProfile()
+    }
+  }, [status, router, fetchProfile])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -334,6 +335,7 @@ export default function ProfilePage() {
           </form>
         </div>
       </div>
+      <PoweredBy />
     </div>
   )
 } 

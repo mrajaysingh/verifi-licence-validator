@@ -4,6 +4,13 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '../../auth/[...nextauth]/route'
 import bcrypt from 'bcryptjs'
 
+interface UpdateData {
+  name: string
+  username: string
+  mobileNumber?: string | null
+  password?: string
+}
+
 // Get admin profile
 export async function GET() {
   try {
@@ -94,7 +101,7 @@ export async function PATCH(request: Request) {
     }
 
     // Prepare update data
-    const updateData: any = {
+    const updateData: UpdateData = {
       name,
       username,
       mobileNumber

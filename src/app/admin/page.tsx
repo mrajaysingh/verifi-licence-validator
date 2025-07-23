@@ -1,498 +1,370 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { signOut, useSession } from 'next-auth/react'
+import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
-import { PlusIcon, TrashIcon, ClockIcon, UserCircleIcon, CalendarIcon, Cog6ToothIcon, SparklesIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
-import { Dialog, Transition } from '@headlessui/react'
-import { Fragment } from 'react'
+import { format } from 'date-fns'
 import { InactivityTimer } from '@/components/InactivityTimer'
 import { SessionTimer } from '@/components/SessionTimer'
+import { PoweredBy } from '@/components/PoweredBy'
+import { LogoutConfirmDialog } from '@/components/LogoutConfirmDialog'
 import { ExtendLicenseModal } from '@/components/ExtendLicenseModal'
-import { NetworkError } from '@/components/NetworkError'
-import { generateLicenseKey } from '@/lib/utils'
+import { EditLicenseModal } from '@/components/EditLicenseModal'
+import { ArrowPathIcon } from '@heroicons/react/24/outline'
 
 interface License {
   id: string
   key: string
   email: string
-  domain: string | null
-  isActive: boolean
+  expiresAt: string
   createdAt: string
-  activatedAt: string | null
-  expiresAt: string | null
-  createdBy: {
-    name: string
-    email: string
-  } | null
+  updatedAt: string
 }
 
 export default function AdminPage() {
   const router = useRouter()
   const { data: session, status } = useSession()
   const [mounted, setMounted] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [licenses, setLicenses] = useState<License[]>([])
-  const [ipAddress, setIpAddress] = useState<string>('Loading...')
-  const [loginTime, setLoginTime] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const [isCreating, setIsCreating] = useState(false)
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false)
+  const [showTimer, setShowTimer] = useState(false)
+  const [showExtendModal, setShowExtendModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [selectedLicense, setSelectedLicense] = useState<License | null>(null)
   const [formData, setFormData] = useState({
     key: '',
     email: '',
-    domain: '',
     expiresAt: ''
   })
-  const [timerActive, setTimerActive] = useState(false)
-  const [selectedLicense, setSelectedLicense] = useState<License | null>(null)
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   useEffect(() => {
     setMounted(true)
-    // Get login time
-    const now = new Date()
-    setLoginTime(now.toLocaleTimeString())
-    
-    // Get IP address
-    fetch('https://api.ipify.org?format=json')
-      .then(res => res.json())
-      .then(data => setIpAddress(data.ip))
-      .catch(() => setIpAddress('Unable to fetch IP'))
   }, [])
 
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/login')
-    } else if (status === 'authenticated') {
-      fetchLicenses()
     }
   }, [status, router])
 
+  useEffect(() => {
+    fetchLicenses()
+  }, [])
+
   const fetchLicenses = async () => {
     try {
-      const response = await fetch('/api/licenses')
-      if (!response.ok) {
-        throw new Error('Failed to fetch licenses')
-      }
-      const data = await response.json()
+      const res = await fetch('/api/licenses')
+      if (!res.ok) throw new Error('Failed to fetch licenses')
+      const data = await res.json()
       setLicenses(data)
     } catch (error) {
-      console.error('Error fetching licenses:', error)
-      if (error instanceof Error && error.message.includes('Unauthorized')) {
-        signOut({ redirect: true, callbackUrl: '/login' })
-      } else {
-        toast.error('Failed to fetch licenses')
-      }
+      toast.error('Failed to load licenses')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }))
-  }
-
-  const handleCreateLicense = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // Validate required fields
-    if (!formData.key || !formData.key.match(/^[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}$/)) {
-      toast.error('Please enter a valid license key in the correct format')
-      return
-    }
-
-    if (!formData.email || !formData.email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-      toast.error('Please enter a valid email address')
-      return
-    }
-
-    if (!formData.expiresAt) {
-      toast.error('Please select an expiration date')
-      return
-    }
-
-    // Validate expiration date is in the future
-    const expiryDate = new Date(formData.expiresAt)
-    if (expiryDate <= new Date()) {
-      toast.error('Expiration date must be in the future')
+    if (!formData.key || !formData.email || !formData.expiresAt) {
+      toast.error('Please fill in all required fields')
       return
     }
 
     try {
-      const response = await fetch('/api/licenses', {
+      setIsCreating(true)
+      const res = await fetch('/api/licenses', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
       })
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.error || 'Failed to create license')
-      }
+      if (!res.ok) throw new Error('Failed to create license')
 
       toast.success('License created successfully')
-      setFormData({
-        key: '',
-        email: '',
-        domain: '',
-        expiresAt: ''
-      })
       fetchLicenses()
+      setFormData({ key: '', email: '', expiresAt: '' })
     } catch (error) {
-      console.error('Error creating license:', error)
-      if (error instanceof Error && error.message === 'Failed to fetch') {
-        // Network error is handled by NetworkError component
-        return
-      }
-      toast.error(error instanceof Error ? error.message : 'Failed to create license')
+      toast.error('Failed to create license')
+    } finally {
+      setIsCreating(false)
     }
   }
 
-  const handleDeleteLicense = async (id: string) => {
+  const handleDelete = async (id: string) => {
     try {
-      const response = await fetch(`/api/licenses/${id}`, {
-        method: 'DELETE',
+      const res = await fetch(`/api/licenses?id=${id}`, {
+        method: 'DELETE'
       })
 
-      if (!response.ok) {
-        throw new Error('Failed to delete license')
-      }
+      if (!res.ok) throw new Error('Failed to delete license')
 
       toast.success('License deleted successfully')
       fetchLicenses()
     } catch (error) {
-      console.error('Error deleting license:', error)
-      if (error instanceof Error && error.message === 'Failed to fetch') {
-        // Network error is handled by NetworkError component
-        return
-      }
       toast.error('Failed to delete license')
     }
   }
 
-  const handleExtendLicense = (license: License) => {
+  const generateLicenseKey = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    const segments = Array.from({ length: 5 }, () =>
+      Array.from({ length: 5 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+    )
+    const key = segments.join('-')
+    setFormData(prev => ({ ...prev, key }))
+  }
+
+  const handleExtend = (license: License) => {
     setSelectedLicense(license)
+    setShowExtendModal(true)
   }
 
-  const handleExtendSuccess = () => {
-    toast.success('License extended successfully')
-    fetchLicenses()
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true)
+      await fetchLicenses()
+      toast.success('Licenses refreshed')
+    } catch (error) {
+      toast.error('Failed to refresh licenses')
+    } finally {
+      setIsRefreshing(false)
+    }
   }
 
-  const handleLogoutClick = () => {
-    setShowLogoutConfirm(true)
+  const handleEdit = (license: License) => {
+    setSelectedLicense(license)
+    setShowEditModal(true)
   }
 
-  const handleLogoutConfirm = async () => {
-    setShowLogoutConfirm(false)
-    await signOut({ redirect: true, callbackUrl: '/login' })
-  }
-
-  const handleTimerStart = () => {
-    setTimerActive(true)
-  }
-
-  const handleTimerReset = () => {
-    setTimerActive(false)
-  }
-
-  const handleGenerateKey = () => {
-    const newKey = generateLicenseKey()
-    setFormData(prev => ({
-      ...prev,
-      key: newKey
-    }))
-    toast.success('License key generated')
-  }
-
-  if (!mounted || !session) {
+  if (!mounted || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0f0f0f] p-4">
-        <div className="h-8 w-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="h-8 w-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen p-8">
-      <NetworkError />
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col gap-4 mb-8">
-          <div className="flex justify-between items-center">
-            <h1 className="text-4xl font-bold">License Manager</h1>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => router.push('/admin/profile')}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2"
-              >
-                <Cog6ToothIcon className="w-5 h-5" />
-                Profile Settings
-              </button>
-              <button
-                onClick={handleLogoutClick}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-              >
-                Logout
-              </button>
-            </div>
+    <main className="min-h-screen p-4 sm:p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto space-y-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
+              License Management
+            </h1>
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+              Manage software license keys and their validity
+            </p>
           </div>
-          
-          <div className="backdrop-blur-lg bg-white/5 rounded-lg p-4 flex flex-wrap gap-4 text-sm">
-            <div className="flex items-center gap-2">
-              <UserCircleIcon className="w-5 h-5" />
-              <span className="text-gray-300">User: </span>
-              <span className="font-medium">{session?.user?.name}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <ClockIcon className="w-5 h-5" />
-              <span className="text-gray-300">Login Time: </span>
-              <span className="font-medium">{loginTime}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-gray-300">IP Address: </span>
-              <span className="font-medium">{ipAddress}</span>
-            </div>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ArrowPathIcon className={`w-5 h-5 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            <button
+              onClick={() => router.push('/admin/profile')}
+              className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Profile
+            </button>
+            <button
+              onClick={() => setShowLogoutDialog(true)}
+              className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-700"
+            >
+              Logout
+            </button>
           </div>
         </div>
 
         {/* Create License Form */}
-        <div className="backdrop-blur-lg bg-white/10 rounded-2xl p-6 mb-8 shadow-lg">
-          <h2 className="text-2xl font-semibold mb-4">Create New License</h2>
-          <form onSubmit={handleCreateLicense} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="key" className="block text-sm font-medium mb-1">
-                License Key <span className="text-red-500">*</span>
-              </label>
-              <div className="flex gap-2">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6">
+          <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Create New License</h2>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="relative">
+                <label htmlFor="key" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  License Key *
+                </label>
+                <div className="mt-1 flex rounded-md shadow-sm">
+                  <input
+                    type="text"
+                    id="key"
+                    required
+                    value={formData.key}
+                    onChange={(e) => setFormData(prev => ({ ...prev, key: e.target.value }))}
+                    className="flex-1 block w-full min-w-0 px-3 py-2 rounded-l-md text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={generateLicenseKey}
+                    className="relative -ml-px inline-flex items-center px-3 py-2 rounded-r-md border border-l-0 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    Generate
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Email *
+                </label>
                 <input
-                  type="text"
-                  id="key"
-                  name="key"
-                  value={formData.key}
-                  onChange={handleInputChange}
-                  className="flex-1 bg-black/20 border border-white/10 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  type="email"
+                  id="email"
                   required
-                  pattern="[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}"
-                  title="License key must be in the format: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-                  placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+                  value={formData.email}
+                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                  className="mt-1 block w-full px-3 py-2 rounded-md text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-blue-500 focus:border-blue-500"
                 />
+              </div>
+              <div>
+                <label htmlFor="expiresAt" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Expiry Date *
+                </label>
+                <input
+                  type="date"
+                  id="expiresAt"
+                  required
+                  value={formData.expiresAt}
+                  onChange={(e) => setFormData(prev => ({ ...prev, expiresAt: e.target.value }))}
+                  min={new Date().toISOString().split('T')[0]}
+                  className="mt-1 block w-full px-3 py-2 rounded-md text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div className="flex items-end">
                 <button
-                  type="button"
-                  onClick={handleGenerateKey}
-                  className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2"
-                  title="Generate License Key"
+                  type="submit"
+                  disabled={isCreating}
+                  className="w-full px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  <SparklesIcon className="w-5 h-5" />
+                  {isCreating ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Creating...</span>
+                    </>
+                  ) : (
+                    'Create License'
+                  )}
                 </button>
               </div>
-            </div>
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium mb-1">
-                Email <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="email"
-                id="email"
-                name="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-                pattern="[^\s@]+@[^\s@]+\.[^\s@]+"
-                title="Please enter a valid email address"
-              />
-            </div>
-            <div>
-              <label htmlFor="domain" className="block text-sm font-medium mb-1">
-                Domain
-              </label>
-              <input
-                type="text"
-                id="domain"
-                name="domain"
-                value={formData.domain}
-                onChange={handleInputChange}
-                className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="example.com (optional)"
-              />
-            </div>
-            <div>
-              <label htmlFor="expiresAt" className="block text-sm font-medium mb-1">
-                Expiration Date <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="date"
-                id="expiresAt"
-                name="expiresAt"
-                value={formData.expiresAt}
-                onChange={handleInputChange}
-                className="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-                min={new Date().toISOString().split('T')[0]}
-                title="Please select a future date"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <button
-                type="submit"
-                className="w-full md:w-auto px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                <PlusIcon className="w-5 h-5" />
-                Create License
-              </button>
             </div>
           </form>
         </div>
 
-        {/* Licenses List */}
-        <div className="backdrop-blur-lg bg-white/10 rounded-2xl p-6 shadow-lg overflow-x-auto">
-          <h2 className="text-2xl font-semibold mb-4">Licenses</h2>
-          {loading ? (
-            <div className="flex justify-center p-8">
-              <div className="h-8 w-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            </div>
-          ) : licenses.length === 0 ? (
-            <p className="text-center text-gray-400 py-8">No licenses found</p>
-          ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="text-left border-b border-white/10">
-                  <th className="pb-2">Key</th>
-                  <th className="pb-2">Email</th>
-                  <th className="pb-2">Domain</th>
-                  <th className="pb-2">Status</th>
-                  <th className="pb-2">Created</th>
-                  <th className="pb-2">Expires</th>
-                  <th className="pb-2">Actions</th>
+        {/* Licenses Table */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-700">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    License Key
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Email
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Expires
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Created
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {licenses.map((license) => (
-                  <tr key={license.id} className="border-b border-white/5">
-                    <td className="py-3 font-mono text-sm">{license.key}</td>
-                    <td className="py-3">{license.email}</td>
-                    <td className="py-3">{license.domain || '-'}</td>
-                    <td className="py-3">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs ${
-                          license.isActive
-                            ? 'bg-green-500/20 text-green-300'
-                            : 'bg-red-500/20 text-red-300'
-                        }`}
+                  <tr key={license.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                      {license.key}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                      {license.email}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                      {format(new Date(license.expiresAt), 'MMM d, yyyy')}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                      {format(new Date(license.createdAt), 'MMM d, yyyy')}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                      <button
+                        onClick={() => handleEdit(license)}
+                        className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
                       >
-                        {license.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="py-3">{new Date(license.createdAt).toLocaleDateString()}</td>
-                    <td className="py-3">
-                      {license.expiresAt
-                        ? new Date(license.expiresAt).toLocaleDateString()
-                        : '-'}
-                    </td>
-                    <td className="py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleExtendLicense(license)}
-                          className="p-1 hover:bg-blue-500/20 rounded-lg transition-colors"
-                          title="Extend License"
-                        >
-                          <CalendarIcon className="w-5 h-5 text-blue-400" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteLicense(license.id)}
-                          className="p-1 hover:bg-red-500/20 rounded-lg transition-colors"
-                          title="Delete License"
-                        >
-                          <TrashIcon className="w-5 h-5 text-red-400" />
-                        </button>
-                      </div>
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleExtend(license)}
+                        className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                      >
+                        Extend
+                      </button>
+                      <button
+                        onClick={() => handleDelete(license.id)}
+                        className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}
+                {licenses.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                      No licenses found
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* Logout Confirmation Dialog */}
-      <Transition appear show={showLogoutConfirm} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={() => setShowLogoutConfirm(false)}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/75" />
-          </Transition.Child>
-
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4 text-center">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-2xl bg-[#1a1a1a] p-6 text-left align-middle shadow-xl transition-all border border-white/10">
-                  <div className="flex items-center gap-4 text-yellow-400 mb-4">
-                    <ExclamationTriangleIcon className="h-6 w-6" />
-                    <Dialog.Title as="h3" className="text-lg font-medium leading-6">
-                      Confirm Logout
-                    </Dialog.Title>
-                  </div>
-
-                  <div className="mt-2">
-                    <p className="text-sm text-gray-300">
-                      Are you sure you want to log out? Any unsaved changes will be lost.
-                    </p>
-                  </div>
-
-                  <div className="mt-6 flex justify-end gap-3">
-                    <button
-                      type="button"
-                      className="inline-flex justify-center rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-gray-200 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/20"
-                      onClick={() => setShowLogoutConfirm(false)}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex justify-center rounded-lg border border-transparent bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-                      onClick={handleLogoutConfirm}
-                    >
-                      Logout
-                    </button>
-                  </div>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-
-      <InactivityTimer onTimerStart={handleTimerStart} onTimerReset={handleTimerReset} />
-      <SessionTimer isActive={timerActive} onReset={handleTimerReset} />
-      {selectedLicense && (
-        <ExtendLicenseModal
-          licenseId={selectedLicense.id}
-          currentExpiry={selectedLicense.expiresAt}
-          onClose={() => setSelectedLicense(null)}
-          onSuccess={handleExtendSuccess}
+      {/* Timers and Modals */}
+      <InactivityTimer
+        onTimerStart={() => setShowTimer(true)}
+        onTimerReset={() => setShowTimer(false)}
+      />
+      {showTimer && <SessionTimer />}
+      {showLogoutDialog && (
+        <LogoutConfirmDialog
+          onClose={() => setShowLogoutDialog(false)}
         />
       )}
-    </div>
+      {showExtendModal && selectedLicense && (
+        <ExtendLicenseModal
+          license={selectedLicense}
+          onClose={() => {
+            setShowExtendModal(false)
+            setSelectedLicense(null)
+          }}
+          onSuccess={fetchLicenses}
+        />
+      )}
+      {showEditModal && selectedLicense && (
+        <EditLicenseModal
+          license={selectedLicense}
+          onClose={() => {
+            setShowEditModal(false)
+            setSelectedLicense(null)
+          }}
+          onSuccess={fetchLicenses}
+        />
+      )}
+      <PoweredBy className="fixed bottom-4 right-4" />
+    </main>
   )
-} 
+}  
